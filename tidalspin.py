@@ -18,7 +18,7 @@ settup_str = """
               * andrew.mummery@physics.ox.ac.uk
 """
 
-print(settup_str)
+print(settup_str)## Forgive me, I coded this during a boring talk. 
 
 
 def main():
@@ -52,8 +52,8 @@ def main():
     plt.rcParams['savefig.bbox'] = 'tight'
 
 
-    if 0:
-        logM = 8.5
+    if 1:
+        logM = 8.75
         sigmaM = 0.3 
 
         p_a, a = get_spin_dist(logM=logM, sigmaM=sigmaM)
