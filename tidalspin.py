@@ -2,8 +2,6 @@ import numpy as np
 from numpy import cos, sin, pi, roots
 from astropy import constants 
 from tqdm import tqdm
-from scipy.stats import ks_2samp, gaussian_kde
-import pickle
 import matplotlib.pyplot as plt
 
 Ms = constants.M_sun.value
@@ -21,7 +19,6 @@ settup_str = """
                                                |______|
 
              TidalSpin was created by Andrew Mummery*
-                It is still in development. 
 
               * andrew.mummery@physics.ox.ac.uk
 """
@@ -33,18 +30,16 @@ def main():
     format_plots_nicely()
 
     ### Produce 2D mass spin contours with Monte Carlo, and two 1D posteriors. 
-    logM = np.log10(MH_sig(225))## prior estimate for peak of log_10(black hole mass). ASASSN-15lh is the TDE. 
+    logM = 8.5##Some prior log10(mass) estimate. 
     sigmaM = 0.3## uncertainty in log_10(black hole mass) from M-sigma relationship
 
     prior_MBH = lambda lm: log_norm(lm, logM, sigmaM) * (10**lm/1e8)**0.03 * np.exp(-(10**lm/(6.4e7))**0.49)## Assume log-normal mass prior. 
 
-    prior_spins = lambda a: np.ones_like(a)## agnostic spin prior. 
+    hm, mass_matrix = get_hills_masses()## Get Hills masses for solar mass star (for comparison)
 
-    hm = get_hills_masses()## Get Hills masses for solar mass star (for comparison)
-
-    p_a, a = one_d_spin_dist(prior_Mbh=prior_MBH, prior_spin=prior_spins, log_Mbh_min=7, log_Mbh_max=10, Mstar_max=1)## Get 1D spin posterior 
-    p_m, m = one_d_mass_dist(prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10, prior_spin=prior_spins, Mstar_max=1)## Get 1D mass posterior
-    a_samples, m_samples, _, _ = monte_carlo_all(prior_Mbh=prior_MBH, prior_spin=prior_spins, log_Mbh_min=7, log_Mbh_max=10, N_draw=100000, Mstar_max=1)
+    p_a, a = one_d_spin_dist(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10)## Get 1D spin posterior 
+    p_m, m = one_d_mass_dist(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10)## Get 1D mass posterior
+    a_samples, m_samples, _, _ = monte_carlo_all(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10, N_draw=100000)
     ## Monte Carlo 100,000 TDEs to verify 1D posteriors and determine 2D correlations. 
 
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
@@ -55,7 +50,7 @@ def main():
     ax3.set_xlabel(r'$\log_{10}M_\bullet/M_\odot$', fontsize=30)
     ax3.set_ylabel(r'$a_\bullet$', fontsize=30)
     ax3.plot(np.log10(hm/Ms), a, ls='-.', c='k')
-    ax3.set_ylim(0, 1)
+    ax3.set_ylim(-1, 1)
     ax3.set_xlim(right=9.2)
     ax3_xlim = ax3.get_xlim()
 
@@ -75,7 +70,7 @@ def main():
     ax4.yaxis.set_label_position("right")
     ax4.set_ylabel(r'$p(a_\bullet)$', fontsize=30, rotation=270, labelpad=40)
     ax4.set_xlabel(r'$a_\bullet$', fontsize=30)
-    ax4.set_xlim(0, 1)
+    ax4.set_xlim(-1, 1)
     ax4.yaxis.tick_right()
     ax4.set_yticks([])
     ax4.set_yticklabels([])
@@ -113,63 +108,6 @@ def format_plots_nicely():
     return 
 
     
-
-def get_pars(k):
-    """
-    Inputs: 
-        k = label of the variable you want from the Table in the paper. 
-    
-    Returns: 
-        vals = the values of the variable. 
-        err_low = the lower error on the variable. 
-        err_up = the upper error on the variable. 
-    
-    Notes:
-        Quantities returned in log_10, and errors represent the 68% confidence level interval. 
-
-        If k is one of 'Name', 'RA', 'DEC', 'Redshift', 'Spectral type', then no errors returned. 
-
-    """
-
-    dp, dn = load_dicts()
-
-    if k in ['Name', 'RA', 'DEC', 'Redshift', 'Spectral type']:
-        vals = []
-        for n in dp[k]:
-            vals += [n]
-        for n in dn[k]:
-            vals += [n]
-        return vals
-
-
-    val = np.asarray([dp[k][i][0] for i in range(len(dp[k]))])
-    err_down = np.asarray([dp[k][i][1] for i in range(len(dp[k]))])
-    err_up = np.asarray([dp[k][i][2] for i in range(len(dp[k]))])
-    
-    tmp = np.asarray([0 for _ in range(len(dn[k]))])
-    tmp_err_down = np.asarray([0 for _ in range(len(dn[k]))])
-    tmp_err_up = np.asarray([0 for _ in range(len(dn[k]))])
-
-    if ('Plateau' not in k): 
-        tmp = np.asarray([dn[k][i][0] for i in range(len(dn[k]))])
-        tmp_err_down = np.asarray([dn[k][i][1] for i in range(len(dn[k]))])
-        tmp_err_up = np.asarray([dn[k][i][2] for i in range(len(dn[k]))])
-
-    val = np.append(val, tmp)
-    err_down = np.append(err_down, tmp_err_down)
-    err_up = np.append(err_up, tmp_err_up)
-
-    return val, err_down, err_up
-
-
-def load_dicts():
-    with open('/Users/mummery/Documents/manyTDE/data/inferred_params/plateau_tdes.pkl', 'rb') as f:
-        dp = pickle.load(f)    
-    with open('/Users/mummery/Documents/manyTDE/data/inferred_params/no_plateau_tdes.pkl', 'rb') as f:
-        dn = pickle.load(f)    
-    return dp, dn
-
-
 def get_ibso(a, psi):
     cs = [a**8 * cos(psi)**4, 
           0, 
@@ -199,19 +137,17 @@ def get_ibso(a, psi):
 
 def hills_mass(a, psi, eta=1, mstar=1, rstar=1):
     x = get_ibso(a, psi)
-    amp = (2/eta * c**6 * Rs**3/(G**3 * Ms))**0.5 * 1/x**1.5 
+    amp = (2/eta * c**6 * (rstar * Rs)**3/(G**3 * mstar * Ms))**0.5 * 1/x**1.5 
     fac = (1 + 6*x/(x**2 - a**2*cos(psi)**2) + 3*a**2/(2*x**2) - 6*a*sin(psi)/x**1.5 * (x**2/(x**2 - a**2*cos(psi)**2))**0.5)**0.5
     return amp * fac
 
 
 def get_hills_masses(N_spin = 300, 
-                  N_psi = 200, 
-                  Mstar=1):
+                  N_psi = 200):
 
 
     psi_ = np.linspace(0.001, pi/2, N_psi)
     a_ = np.linspace(-0.9999, +0.9999, N_spin)
-    Mstar *= Ms
 
     print('Generating Hills masses......')
     max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
@@ -224,10 +160,7 @@ def get_hills_masses(N_spin = 300,
     for j in range(len(a_)):
         max_m[j] = max(max_mass_matrix[j, :])
 
-    f = ((MassRadiusRelation(Mstar)/Rs)**1.5 * (Ms/Mstar)**0.5)
-    max_m *= f 
-    
-    return max_m
+    return max_m, max_mass_matrix
     
 
 #### Sampling many objects
@@ -270,17 +203,94 @@ def log_norm(x, log_mu, log_sigma):
     ### Mean must be in log10, as must x. 
     return 1/(np.sqrt(2*np.pi)*log_sigma) * np.exp(-(x-log_mu)**2/(2*log_sigma**2))
 
-### Galactic scaling relationships 
-def MH_Mgal(Mgal):
-    ## galaxy mass in M_sun, returns black hole mass in M_sun. 
-    return 10**(7.43 + 1.61 * np.log10(Mgal/3e10))
+def one_d_spin_fixed_mass(Mbh, 
+                  prior_spin=None, 
+                  max_mass_matrix=None, 
+                  prior_star=None, 
+                  prior_psi=None,
 
-def MH_sig(sig):
-    ## sigma in km/s, returns black hole mass in M_sun. 
-    return 10**(7.87 + 4.384 * np.log10(sig/160))
+                  N_star = 100, 
+                  Mstar_min=0.1, 
+                  Mstar_max=1,
+
+                  N_spin = 300, 
+                  N_psi = 200, 
+
+                  eta = 1):
+    
+    if prior_spin is None:
+        prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
 
 
-def one_d_spin_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
+    Mstar_min *=  Ms
+    Mstar_max *=  Ms
+
+    mstars = np.logspace(np.log10(Mstar_min), np.log10(Mstar_max), N_star+1)
+    if prior_star is None:
+        psd = StellarMassDistributionFunction(Mmin=Mstar_min,Mmax=Mstar_max,N=N_star+1)
+    else:
+        psd = prior_star(mstars)
+
+    dMs = mstars[1:]-mstars[:-1]
+    mstars = mstars[:-1]
+
+    if max_mass_matrix is None:
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+
+        print('Generating mass matrix......')
+        max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
+
+        for i, a in enumerate(tqdm(a_)):
+            for j, psi in enumerate(psi_):
+                max_mass_matrix[i, j] = hills_mass(a, psi)
+    else:
+        N_spin = len(max_mass_matrix[:, 0])
+        N_psi =  len(max_mass_matrix[0, :])
+
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+
+    dpsi = psi_[1] - psi_[0]
+    da_ = a_[1] - a_[0]
+
+    f = ((MassRadiusRelation(mstars)/Rs)**1.5 * (Ms/mstars)**0.5 * eta**0.5)
+
+    mass_mass_matrix = [[] for _ in range(N_spin)]
+
+    for k in range(N_spin):
+        tmp_matrix = np.zeros(N_psi * N_star).reshape(N_psi, N_star)
+        for u in range(N_psi):
+            tmp_matrix[u, :] = max_mass_matrix[k, u] * f
+        mass_mass_matrix[k] = tmp_matrix
+
+
+    p_a = np.zeros(N_spin)
+
+    if prior_psi is None:
+        ppsi = np.cos(psi_)
+    else:
+        ppsi = prior_psi(psi_)
+
+
+    for i, a in enumerate(a_):
+        p = 0
+        p_ = np.heaviside(mass_mass_matrix[i] - Mbh, 1) 
+        p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_spin(a) * da_
+        
+        p_a[i] = p
+
+    p_a = p_a
+    p_a = p_a/sum(p_a * da_)
+    
+    return p_a, a_
+
+
+
+
+def one_d_spin_dist(prior_Mbh, log_Mbh_min, log_Mbh_max, 
+                  prior_spin=None,
+                  max_mass_matrix = None, 
                   prior_star=None, 
                   prior_psi=None,
 
@@ -328,6 +338,8 @@ def one_d_spin_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
 
     """
 
+    if prior_spin is None:
+        prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
 
 
     Mstar_min *=  Ms
@@ -343,28 +355,37 @@ def one_d_spin_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
     dMs = mstars[1:]-mstars[:-1]
     mstars = mstars[:-1]
 
+    if max_mass_matrix is None:
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        dpsi = psi_[1] - psi_[0]
 
-    psi_ = np.linspace(0.001, pi/2, N_psi)
-    dpsi = psi_[1] - psi_[0]
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+        da_ = a_[1] - a_[0]
+
+        print('Generating mass matrix......')
+        max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
+
+        for i, a in enumerate(tqdm(a_)):
+            for j, psi in enumerate(psi_):
+                max_mass_matrix[i, j] = hills_mass(a, psi)
+    
+    else:
+        N_spin = len(max_mass_matrix[:, 0])
+        N_psi =  len(max_mass_matrix[0, :])
+
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+
+        dpsi = psi_[1] - psi_[0]
+        da_ = a_[1] - a_[0]
+
+
+    f = ((MassRadiusRelation(mstars)/Rs)**1.5 * (Ms/mstars)**0.5 * eta**0.5)
 
     if prior_psi is None:
         ppsi = np.cos(psi_)
     else:
         ppsi = prior_psi(psi_)
-
-
-    a_ = np.linspace(-0.9999, +0.9999, N_spin)
-    da_ = a_[1] - a_[0]
-
-    print('Generating mass matrix......')
-    max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
-
-    for i, a in enumerate(tqdm(a_)):
-        for j, psi in enumerate(psi_):
-            max_mass_matrix[i, j] = hills_mass(a, psi)
-
-
-    f = ((MassRadiusRelation(mstars)/Rs)**1.5 * (Ms/mstars)**0.5 * eta**0.5)
 
     mass_mass_matrix = [[] for _ in range(N_spin)]
 
@@ -399,13 +420,15 @@ def one_d_spin_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
 
 
 
-def one_d_mass_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
+def one_d_mass_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
+                  prior_spin=None,
+                  max_mass_matrix = None, 
                   prior_star=None, 
                   prior_psi=None,
 
                   N_star = 100, 
                   Mstar_min=0.1, 
-                  Mstar_max=10,
+                  Mstar_max=1,
 
                   N_bh = 150, 
                   N_spin = 300, 
@@ -435,7 +458,10 @@ def one_d_mass_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
         p_mbh = the values of the posterior.
 
     """
-  
+    if prior_spin is None:
+        prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
+
+
     Mstar_min *=  Ms
     Mstar_max *=  Ms
 
@@ -449,28 +475,37 @@ def one_d_mass_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
     dMs = mstars[1:]-mstars[:-1]
     mstars = mstars[:-1]
 
+    if max_mass_matrix is None:
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        dpsi = psi_[1] - psi_[0]
 
-    psi_ = np.linspace(0.001, pi/2, N_psi)
-    dpsi = psi_[1] - psi_[0]
+
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+        da_ = a_[1] - a_[0]
+
+        print('Generating mass matrix......')
+        max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
+
+        for i, a in enumerate(tqdm(a_)):
+            for j, psi in enumerate(psi_):
+                max_mass_matrix[i, j] = hills_mass(a, psi)
+
+    else:
+        N_spin = len(max_mass_matrix[:, 0])
+        N_psi =  len(max_mass_matrix[0, :])
+
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+
+        dpsi = psi_[1] - psi_[0]
+        da_ = a_[1] - a_[0]
+
+    f = ((MassRadiusRelation(mstars)/Rs)**1.5 * (Ms/mstars)**0.5 * eta**0.5)
 
     if prior_psi is None:
         ppsi = np.cos(psi_)
     else:
         ppsi = prior_psi(psi_)
-
-
-    a_ = np.linspace(-0.9999, +0.9999, N_spin)
-    da_ = a_[1] - a_[0]
-
-    print('Generating mass matrix......')
-    max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
-
-    for i, a in enumerate(tqdm(a_)):
-        for j, psi in enumerate(psi_):
-            max_mass_matrix[i, j] = hills_mass(a, psi)
-
-
-    f = ((MassRadiusRelation(mstars)/Rs)**1.5 * (Ms/mstars)**0.5 * eta**0.5)
 
     mass_mass_matrix = [[] for _ in range(N_spin)]
 
@@ -505,7 +540,9 @@ def one_d_mass_dist(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
     return p_bh, log_Ms
 
 
-def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
+def monte_carlo_all(prior_Mbh, log_Mbh_min, log_Mbh_max,
+                  prior_spin=None,
+                  max_mass_matrix=None,
                   prior_star=None, 
                   prior_psi=None,
                   
@@ -517,7 +554,7 @@ def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
                   N_psi = 200, 
 
                   Mstar_min=0.1, 
-                  Mstar_max=10,
+                  Mstar_max=1,
                   
                   eta = 1,
                   
@@ -545,6 +582,8 @@ def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
         Returned samples a_samples includes both prograde and retrograde spins.  
 
     """
+    if prior_spin is None:
+        prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
     
     log_Ms = np.linspace(log_Mbh_min, log_Mbh_max, N_bh)
     dMbh = (log_Ms[1] - log_Ms[0])
@@ -565,9 +604,28 @@ def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
     mstars = mstars[:-1]
     PHI_stars = np.cumsum(psd * dMs)
 
+    if max_mass_matrix is None:
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        dpsi = psi_[1] - psi_[0]
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+        da_ = a_[1] - a_[0]
+        print('Generating mass matrix......')
+        max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
 
-    psi_ = np.linspace(0.001, pi/2, N_psi)
-    dpsi = psi_[1] - psi_[0]
+        for i, a in enumerate(tqdm(a_)):
+            for j, psi in enumerate(psi_):
+                max_mass_matrix[i, j] = hills_mass(a, psi)
+
+    else:
+        N_spin = len(max_mass_matrix[:, 0])
+        N_psi =  len(max_mass_matrix[0, :])
+
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+
+        dpsi = psi_[1] - psi_[0]
+        da_ = a_[1] - a_[0]
+
 
     if prior_psi is None:
         ppsi = np.cos(psi_)
@@ -575,10 +633,7 @@ def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
         ppsi = prior_psi(psi_)
 
     PHI_psis = np.cumsum(ppsi * dpsi)
-
     
-    a_ = np.linspace(-0.9999, +0.9999, N_spin)
-    da_ = a_[1] - a_[0]
     PHI_A = np.cumsum(prior_spin(a_)*da_)/np.sum(prior_spin(a_)*da_)
 
 
@@ -587,12 +642,6 @@ def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
     m_star_samples = np.full(N_draw, np.nan)
     psi_samples = np.full(N_draw, np.nan)
 
-    print('Generating mass matrix......')
-    max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
-
-    for i, a in enumerate(tqdm(a_)):
-        for j, psi in enumerate(psi_):
-            max_mass_matrix[i, j] = hills_mass(a, psi)
 
     if likelihood is None:
         likelihood = lambda x: np.ones_like(x)
@@ -642,13 +691,15 @@ def monte_carlo_all(prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
 
 
 def one_d_observable_dist(observe_dist, observe_values,
-                  prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
+                  prior_Mbh, log_Mbh_min, log_Mbh_max,
+                  prior_spin=None,
+                  max_mass_matrix = None,
                   prior_star=None, 
                   prior_psi=None,
 
                   N_star = 100, 
                   Mstar_min=0.1, 
-                  Mstar_max=10,
+                  Mstar_max=1,
 
                   N_bh = 150, 
                   N_spin = 300, 
@@ -656,7 +707,7 @@ def one_d_observable_dist(observe_dist, observe_values,
                   
                   eta = 1): 
     
-    p_tde, m_tde = one_d_mass_dist(prior_Mbh=prior_Mbh, prior_spin=prior_spin, prior_star=prior_star, prior_psi=prior_psi,
+    p_tde, m_tde = one_d_mass_dist(max_mass_matrix=max_mass_matrix, prior_Mbh=prior_Mbh, prior_spin=prior_spin, prior_star=prior_star, prior_psi=prior_psi,
                                    log_Mbh_min=log_Mbh_min, log_Mbh_max=log_Mbh_max, N_star=N_star, Mstar_min=Mstar_min, 
                                    Mstar_max=Mstar_max, N_bh = N_bh, N_spin=N_spin, N_psi=N_psi, eta=eta)## Get 1D mass posterior
     
@@ -672,7 +723,9 @@ def one_d_observable_dist(observe_dist, observe_values,
 
 
 def monte_carlo_observable(observe_func, 
-                  prior_Mbh, prior_spin, log_Mbh_min, log_Mbh_max,
+                  prior_Mbh, log_Mbh_min, log_Mbh_max,
+                  prior_spin=None,
+                  max_mass_matrix=None,
                   prior_star=None, 
                   prior_psi=None,
                   
@@ -684,9 +737,12 @@ def monte_carlo_observable(observe_func,
                   N_psi = 200, 
 
                   Mstar_min=0.1, 
-                  Mstar_max=10,
+                  Mstar_max=1,
                   
                   eta = 1):
+    
+    if prior_spin is None:
+        prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
     
     log_Ms = np.linspace(log_Mbh_min, log_Mbh_max, N_bh)
     dMbh = (log_Ms[1] - log_Ms[0])
@@ -707,9 +763,28 @@ def monte_carlo_observable(observe_func,
     mstars = mstars[:-1]
     PHI_stars = np.cumsum(psd * dMs)
 
+    if max_mass_matrix is None:
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        dpsi = psi_[1] - psi_[0]    
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+        da_ = a_[1] - a_[0]
 
-    psi_ = np.linspace(0.001, pi/2, N_psi)
-    dpsi = psi_[1] - psi_[0]
+        print('Generating mass matrix......')
+        max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
+
+        for i, a in enumerate(tqdm(a_)):
+            for j, psi in enumerate(psi_):
+                max_mass_matrix[i, j] = hills_mass(a, psi)
+    else:
+        N_spin = len(max_mass_matrix[:, 0])
+        N_psi =  len(max_mass_matrix[0, :])
+
+        psi_ = np.linspace(0.001, pi/2, N_psi)
+        a_ = np.linspace(-0.9999, +0.9999, N_spin)
+
+        dpsi = psi_[1] - psi_[0]
+        da_ = a_[1] - a_[0]
+
 
     if prior_psi is None:
         ppsi = np.cos(psi_)
@@ -717,10 +792,6 @@ def monte_carlo_observable(observe_func,
         ppsi = prior_psi(psi_)
 
     PHI_psis = np.cumsum(ppsi * dpsi)
-
-    
-    a_ = np.linspace(-0.9999, +0.9999, N_spin)
-    da_ = a_[1] - a_[0]
     PHI_A = np.cumsum(prior_spin(a_)*da_)/np.sum(prior_spin(a_)*da_)
 
 
@@ -729,14 +800,6 @@ def monte_carlo_observable(observe_func,
     m_star_samples = np.full(N_draw, np.nan)
     psi_samples = np.full(N_draw, np.nan)
     obs_samples = np.full(N_draw, np.nan)
-
-    print('Generating mass matrix......')
-    max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
-
-    for i, a in enumerate(tqdm(a_)):
-        for j, psi in enumerate(psi_):
-            max_mass_matrix[i, j] = hills_mass(a, psi)
-
 
     print('Generating samples......')
     n=0
@@ -780,92 +843,6 @@ def monte_carlo_observable(observe_func,
 
     return obs_samples, a_samples, m_samples, m_star_samples, psi_samples
 
-
-
-
-### Bin this, make all prior_Mbh, prior_spin, etc. 
-def tde_mass_dist(N_draw, 
-                  prior_Mbh=None, 
-                  M_bh_min = 1e5, 
-                  M_bh_max = 1e9, 
-                  N_bh=1000, 
-                  bh_spin = 0.9, 
-                  N_star = 100, 
-                  N_spin = 300, 
-                  N_psi = 200, 
-                  Mstar_min=0.1, 
-                  Mstar_max=10):
-
-    
-
-    log_Ms = np.linspace(np.log10(M_bh_min), np.log10(M_bh_max), N_bh+1)
-    d_Mbhs = log_Ms[1:] - log_Ms[:-1]
-
-    p_MBHs = black_hole_mass_dist(10**log_Ms * Ms)
-    log_Ms = log_Ms[:-1]
-
-
-    PHI_MBH = np.cumsum(p_MBHs*d_Mbhs)/np.sum(p_MBHs*d_Mbhs)
-
-    Mstar_min *=  Ms
-    Mstar_max *=  Ms
-
-
-    mstars = np.logspace(np.log10(Mstar_min), np.log10(Mstar_max), N_star+1)
-    psd = StellarMassDistributionFunction(Mmin=Mstar_min,Mmax=Mstar_max,N=N_star+1)
-
-    dMs = mstars[1:]-mstars[:-1]
-    mstars = mstars[:-1]
-    PHI_stars = np.cumsum(psd * dMs)
-
-    psi_ = np.linspace(0.001, pi/2, N_psi)
-    dpsi = psi_[1] - psi_[0]
-
-
-    a_ = np.array([bh_spin])
-
-    print('Generating mass matrix......')
-    max_mass_matrix = np.zeros(len(a_)*len(psi_)).reshape(len(a_), len(psi_))
-
-    for i, a in enumerate(tqdm(a_)):
-        for j, psi in enumerate(psi_):
-            max_mass_matrix[i, j] = hills_mass(a, psi)
-
-    print('Generating samples......')
-    n=0
-
-    m_samples = np.full(N_draw, np.nan)
-
-    pbar = tqdm(total=N_draw, mininterval=1)
-
-    while n < N_draw:
-        u = np.random.uniform(0, 1, 1)
-        l_m_bh = log_Ms[np.argmin(abs(PHI_MBH - u))]
-        m_bh = 10**l_m_bh * Ms
-
-        w = np.random.uniform(0, 1, 1)
-        m_star = mstars[np.argmin(abs(PHI_stars - w))]
-
-        q = np.random.uniform(0, 1, 1)
-        j = np.argmin(abs(q - cos(psi_)))
-
-        # a_bh = np.random.uniform(0, 1, 1)
-        i = 0#np.argmin(abs(a_ - a_bh))
-
-        p_ = max_mass_matrix[i, j] > (m_bh * (MassRadiusRelation(m_star)/Rs)**-1.5 * (Ms/m_star)**-0.5)
-
-        if p_:
-            m_samples[n] = l_m_bh 
-            # a_samples[n] = a_bh
-            # m_star_samples[n] = m_star
-            # psi_samples[n] = np.arccos(q)
-            n+=1
-            pbar.update()
-
-
-    m_samples = m_samples[m_samples==m_samples]
-
-    return m_samples
 
 
 
