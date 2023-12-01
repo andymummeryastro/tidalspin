@@ -27,21 +27,23 @@ print(settup_str)## Forgive me, I coded a lot of this during a long train journe
 
 def main():
 
-    format_plots_nicely()
+    format_plots_nicely()## Default matplotlib looks rubbish. 
 
     ### Produce 2D mass spin contours with Monte Carlo, and two 1D posteriors. 
     logM = 8.5##Some prior log10(mass) estimate. 
-    sigmaM = 0.3## uncertainty in log_10(black hole mass) from M-sigma relationship
+    sigmaM = 0.3##Uncertainty in log_10(black hole mass) from M-sigma relationship
 
-    prior_MBH = lambda lm: log_norm(lm, logM, sigmaM) * (10**lm/1e8)**0.03 * np.exp(-(10**lm/(6.4e7))**0.49)## Assume log-normal mass prior. 
+    ## The black hole mass prior used in the paper. 
+    prior_MBH = lambda lm: log_norm(lm, logM, sigmaM) * (10**lm/1e8)**0.03 * np.exp(-(10**lm/(6.4e7))**0.49) 
 
     hm, mass_matrix = get_hills_masses()## Get Hills masses for solar mass star (for comparison)
 
-    p_a, a = one_d_spin_dist(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10)## Get 1D spin posterior 
-    p_m, m = one_d_mass_dist(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10)## Get 1D mass posterior
+    p_a, a = spin_posterior(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10)## Get 1D spin posterior 
+    p_m, m = mass_posterior(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10)## Get 1D mass posterior
     a_samples, m_samples, _, _ = monte_carlo_all(max_mass_matrix=mass_matrix, prior_Mbh=prior_MBH, log_Mbh_min=7, log_Mbh_max=10, N_draw=100000)
     ## Monte Carlo 100,000 TDEs to verify 1D posteriors and determine 2D correlations. 
 
+    ## Make plot, similar to figure 10 of the paper. 
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
 
     ax2.axis('off')
@@ -82,6 +84,7 @@ def main():
 
 
 def format_plots_nicely():
+    ### Default matplotlib looks rubbish. 
     plt.rc('text', usetex=True)
     plt.rc('font', family='serif')
     plt.rcParams['xtick.labelsize'] = 18
@@ -109,6 +112,22 @@ def format_plots_nicely():
 
     
 def get_ibso(a, psi):
+    """
+    Solves the numerical octic equation to return xi, the dimensionless
+    innermost bound spherical orbit radius. 
+    See Appendix A of the paper for more details. 
+    
+    Input: 
+        a -- dimensionless black hole spin 
+        psi -- asymptotic inclination of star 
+    Output:
+        xi -- dimensionless ibso radius. 
+    
+    Note:
+        Works in the sign convention -1 < a < 1 and 0 < psi < pi/2. 
+        Will likely return nonsense outside of these bounds. 
+
+    """
     cs = [a**8 * cos(psi)**4, 
           0, 
           -2 * a**6 * cos(psi)**2 + 6 * a**6 * cos(psi)**4,
@@ -136,6 +155,25 @@ def get_ibso(a, psi):
 
 
 def hills_mass(a, psi, eta=1, mstar=1, rstar=1):
+    """
+    Returns the Hills mass for a given black hole spin and incoming stellar angle. 
+
+    Inputs: 
+        a -- dimensionless black hole spin. 
+        psi -- asymptotic inclination of star 
+
+        eta -- stellar self gravity parameter (default = 1)
+        mstar -- stellar mass (solar mass units, default = 1)
+        rstar -- stellar radius (solar radii units, default = 1)
+    
+    Outputs:
+        Mhills -- the Hills mass (solar masses)
+
+    Note:
+        Works in the sign convention -1 < a < 1 and 0 < psi < pi/2. 
+        Will likely return nonsense outside of these bounds. 
+
+    """
     x = get_ibso(a, psi)
     amp = (2/eta * c**6 * (rstar * Rs)**3/(G**3 * mstar * Ms))**0.5 * 1/x**1.5 
     fac = (1 + 6*x/(x**2 - a**2*cos(psi)**2) + 3*a**2/(2*x**2) - 6*a*sin(psi)/x**1.5 * (x**2/(x**2 - a**2*cos(psi)**2))**0.5)**0.5
@@ -144,7 +182,34 @@ def hills_mass(a, psi, eta=1, mstar=1, rstar=1):
 
 def get_hills_masses(N_spin = 300, 
                   N_psi = 200):
+    """
+    Returns the Hills masses for a grid of 
+    black hole spins and incoming stellar angle. 
 
+    Inputs: 
+        N_spin -- number of spins to grid
+        N_psi -- Number of inclinations to grid 
+
+    Outputs:
+        max_m -- the maximum Hills mass for each spin 
+        
+        max_mass_matrix -- the Hills mass for each spin and inclination
+
+    Notes:
+        Grids spins from -0.9999 to +0.9999 in linear steps. 
+        Grids spins from 0, pi/2 in linear steps. 
+
+        Works in the sign convention -1 < a < 1 and 0 < psi < pi/2. 
+        Will likely return nonsense outside of these bounds. 
+
+        This code assumes solar values for M_star, R_star. 
+        This code assumes eta = 1. 
+
+        Hills masses can be shifted by a factor 
+        f=(R_\star/R_\odot)^{3/2} (M_\odot/M_\star)^{1/2} \eta^{-1/2}
+        for other parameters.
+
+    """
 
     psi_ = np.linspace(0.001, pi/2, N_psi)
     a_ = np.linspace(-0.9999, +0.9999, N_spin)
@@ -163,8 +228,17 @@ def get_hills_masses(N_spin = 300,
     return max_m, max_mass_matrix
     
 
-#### Sampling many objects
 def MassRadiusRelation(mstar):
+    """
+    Returns the (Kippenhahn & Weigert 1990) mass-radius relationship for stars. 
+
+    Input:
+        Stellar mass (physical units)
+    Output:
+        Stellar radii (physical units)
+    Notes:
+        Intended only for internal code use. 
+    """
     rstar = np.zeros_like(mstar)
     i_low = mstar < Ms 
     i_high = ~i_low 
@@ -173,6 +247,16 @@ def MassRadiusRelation(mstar):
     return rstar
 
 def KroupaIMF(mstar):
+    """
+    Returns the (Kroupa 2001) initial stellar mass function. 
+
+    Input:
+        List of stellar masses (physical units)
+    Output:
+        Probability density dN_star/dM_star.
+    Notes:
+        Intended only for internal code use. 
+    """
     i_lowest = mstar < 0.08 * Ms 
     i_low = (mstar < 0.5 * Ms) * (~ i_lowest)
     i_med = (mstar < 1 * Ms) * (~ i_lowest) *  (~ i_low)
@@ -188,6 +272,16 @@ def KroupaIMF(mstar):
     return P
     
 def TDE_rate_on_stellar_params(mstar):
+    """
+    Returns the (Wang and Merrit 2004) TDE rate as a function of stellar properties. 
+
+    Input:
+        List of stellar masses (physical units)
+    Output:
+        TDE rate R(M_\star). 
+    Notes:
+        Intended only for internal code use. 
+    """
     rstar = MassRadiusRelation(mstar)
     return np.power(mstar/Ms,-1/3) * np.power(rstar/Rs, 1/4)
 
@@ -203,7 +297,7 @@ def log_norm(x, log_mu, log_sigma):
     ### Mean must be in log10, as must x. 
     return 1/(np.sqrt(2*np.pi)*log_sigma) * np.exp(-(x-log_mu)**2/(2*log_sigma**2))
 
-def one_d_spin_fixed_mass(Mbh, 
+def spin_posterior_fixed_mass(Mbh, 
                   prior_spin=None, 
                   max_mass_matrix=None, 
                   prior_star=None, 
@@ -216,8 +310,50 @@ def one_d_spin_fixed_mass(Mbh,
                   N_spin = 300, 
                   N_psi = 200, 
 
-                  eta = 1):
+                  eta = 1,
+                  additional_likelihood=None):
+    """
+    Returns a black hole spin posterior assuming a fixed black hole mass. Units = physical. 
+
+    Inputs: 
+        Mbh -- the black hole mass at which to produce a posterior. 
+
+        prior_spin -- function that accepts dimensionless spin and returns a prior.
+        If none, defaults to flat prior. 
+
+        max_mass_matrix -- the ooutput of get_hills_masses().
+        If None calculates this matrix in this code. 
+
+        M_star_min, M_star_max -- lower and upper bounds on stellar population. Solar units expected. 
+
+        prior_star, prior_psi -- prior distribtuions of stellar properties and incoming inclinations. 
+        Defaults to the priors used in the paper if None. 
+        
+        N_X -- the number of grid spaces for variable X. 
+
+        eta -- stellar self gravity parameter (see paper).  
+        Defaults to 1. 
+
+        additional_likelihood -- a function that accepts M_bh/M_hills and returns a likelihood. 
+        Defaults to 1 if unspecified (as in paoer). See Appendix D of paper. 
+        Using additional likelihood will result in stronger spin constraints, but must be physically motivated. 
     
+    Returns: 
+        a -- list of spins at which the spin posterior is computed. 
+        p_a -- the values of the posterior. 
+
+    Notes:
+        Returned posterior p_a includes both prograde and retrograde spins.  
+        If the absolute value of the spin is required use p(|a|) = p(a) + p(-a), 
+        or in Python:
+
+        abs_a = a[N_spin/2:]
+
+        p_abs_a = p_a[N_spin/2:] + p_a[N_spin/2 - 1 :: -1]
+
+        Note that this requires N_spin to be an even number. 
+
+    """    
     if prior_spin is None:
         prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
 
@@ -272,11 +408,13 @@ def one_d_spin_fixed_mass(Mbh,
     else:
         ppsi = prior_psi(psi_)
 
+    if additional_likelihood is None:
+        additional_likelihood = lambda x: np.ones_like(x)
 
     for i, a in enumerate(a_):
         p = 0
-        p_ = np.heaviside(mass_mass_matrix[i] - Mbh, 1) 
-        p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_spin(a) * da_
+        p_ = np.heaviside(mass_mass_matrix[i] - Mbh, 1) * additional_likelihood(Mbh/mass_mass_matrix[i]) 
+        p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_spin(a) 
         
         p_a[i] = p
 
@@ -288,7 +426,7 @@ def one_d_spin_fixed_mass(Mbh,
 
 
 
-def one_d_spin_dist(prior_Mbh, log_Mbh_min, log_Mbh_max, 
+def spin_posterior(prior_Mbh, log_Mbh_min, log_Mbh_max, 
                   prior_spin=None,
                   max_mass_matrix = None, 
                   prior_star=None, 
@@ -304,26 +442,36 @@ def one_d_spin_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
                   
                   eta = 1, 
                   
-                  likelihood=None): 
+                  additional_likelihood=None): 
     
     """
     Inputs: 
-        prior_Mbh = function which accepts the logarithm of the black hole mass and returns a prior. 
-        log_Mbh_min, log_Mbh_max = extent of black hole mass range to compute posterior over. 
-        prior_spin = function that accepts dimensionless spin and returns a prior. 
-        M_star_min, M_star_max = lower and upper bounds on stellar population. 
+        prior_Mbh -- function which accepts the logarithm of the black hole mass and returns a prior. 
+        log_Mbh_min, log_Mbh_max -- extent of black hole mass range to compute posterior over. Units = log_10 M_solar.
 
+        prior_spin -- function that accepts dimensionless spin and returns a prior.
+        If none, defaults to flat prior. 
 
-        prior_star, prior_psi = other possible priors, default to sensible ones if left blank. 
-        N_X (etc.) the number of grid spaces for variable X. 
+        max_mass_matrix -- the ooutput of get_hills_masses().
+        If None calculates this matrix in this code. 
 
-        eta = stellar parameter (see paper).  
+        M_star_min, M_star_max -- lower and upper bounds on stellar population. Solar units expected. 
 
-        likelihood = a function that accepts M_bh/M_hills and returns a likelihood. Defaults to 1 if unspecified (as in paoer). 
+        prior_star, prior_psi -- prior distribtuions of stellar properties and incoming inclinations. 
+        Defaults to the priors used in the paper if None. 
+        
+        N_X -- the number of grid spaces for variable X. 
+
+        eta -- stellar self gravity parameter (see paper).  
+        Defaults to 1. 
+
+        additional_likelihood -- a function that accepts M_bh/M_hills and returns a likelihood. 
+        Defaults to 1 if unspecified (as in paoer). See Appendix D of paper. 
+        Using additional likelihood will result in stronger spin constraints, but must be physically motivated. 
     
     Returns: 
-        a = list of spins the posterior is computed at 
-        p_a = the values of the posterior
+        a -- list of spins at which the spin posterior is computed. 
+        p_a -- the values of the posterior. 
 
     Notes:
         Returned posterior p_a includes both prograde and retrograde spins.  
@@ -401,18 +549,18 @@ def one_d_spin_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
     log_Ms = np.linspace(log_Mbh_min, log_Mbh_max, N_bh)
     dMbh = (log_Ms[1] - log_Ms[0])
 
-    if likelihood is None:
-        likelihood = lambda x: np.ones_like(x)
+    if additional_likelihood is None:
+        additional_likelihood = lambda x: np.ones_like(x)
 
     print('Getting 1D spin distribution.....')
     for i, a in enumerate(tqdm(a_)):
         p = 0
         for l_m_bh in log_Ms:
             m_bh = 10**l_m_bh * Ms
-            p_ = np.heaviside(mass_mass_matrix[i] - m_bh, 1)  * likelihood(m_bh/mass_mass_matrix[i]) 
-            p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_Mbh(l_m_bh) * dMbh * prior_spin(a) * da_
+            p_ = np.heaviside(mass_mass_matrix[i] - m_bh, 1)  * additional_likelihood(m_bh/mass_mass_matrix[i]) 
+            p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_Mbh(l_m_bh) * dMbh 
         
-        p_a[i] = p
+        p_a[i] = p * prior_spin(a) 
 
     p_a = p_a/sum(p_a * da_)
     
@@ -420,7 +568,7 @@ def one_d_spin_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
 
 
 
-def one_d_mass_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
+def mass_posterior(prior_Mbh, log_Mbh_min, log_Mbh_max,
                   prior_spin=None,
                   max_mass_matrix = None, 
                   prior_star=None, 
@@ -436,26 +584,38 @@ def one_d_mass_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
                   
                   eta = 1,
                   
-                  likelihood=None): 
+                  additional_likelihood=None): 
 
     """
+    Computes the posterior black hole mass distribution for a TDE with prior black hole mass estimate.
+
     Inputs: 
-        prior_Mbh = function which accepts the logarithm of the black hole mass and returns a prior. 
-        log_Mbh_min, log_Mbh_max = extent of black hole mass range to compute posterior over. 
-        prior_spin = function that accepts dimensionless spin and returns a prior. 
-        M_star_min, M_star_max = lower and upper bounds on stellar population. 
+        prior_Mbh -- function which accepts the logarithm of the black hole mass and returns a prior. 
+        log_Mbh_min, log_Mbh_max -- extent of black hole mass range to compute posterior over. Units = log_10 M_solar.
 
+        prior_spin -- function that accepts dimensionless spin and returns a prior.
+        If none, defaults to flat prior. 
 
-        prior_star, prior_psi = other possible priors, default to sensible ones if left blank. 
-        N_X (etc.) the number of grid spaces for variable X. 
+        max_mass_matrix -- the ooutput of get_hills_masses().
+        If None calculates this matrix in this code. 
 
-        eta = stellar parameter (see paper).  
+        M_star_min, M_star_max -- lower and upper bounds on stellar population. Solar units expected. 
 
-        likelihood = a function that accepts M_bh/M_hills and returns a likelihood. Defaults to 1 if unspecified (as in paoer). 
+        prior_star, prior_psi -- prior distribtuions of stellar properties and incoming inclinations. 
+        Defaults to the priors used in the paper if None. 
+        
+        N_X -- the number of grid spaces for variable X. 
+
+        eta -- stellar self gravity parameter (see paper).  
+        Defaults to 1. 
+
+        additional_likelihood -- a function that accepts M_bh/M_hills and returns a likelihood. 
+        Defaults to 1 if unspecified (as in paoer). See Appendix D of paper. 
+        Using additional likelihood will result in stronger spin constraints, but must be physically motivated. 
     
     Returns: 
-        log_mbh = list of og10 black hole masses the posterior is computed at 
-        p_mbh = the values of the posterior.
+        log_mbh -- list of log10(black hole masses) at which the posterior is computed.
+        p_mbh -- the values of the posterior.
 
     """
     if prior_spin is None:
@@ -519,8 +679,8 @@ def one_d_mass_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
     log_Ms = np.linspace(log_Mbh_min, log_Mbh_max, N_bh)
     dMbh = (log_Ms[1] - log_Ms[0])
 
-    if likelihood is None:
-        likelihood = lambda x: np.ones_like(x)
+    if additional_likelihood is None:
+        additional_likelihood = lambda x: np.ones_like(x)
     
 
     p_bh = np.zeros(len(log_Ms))
@@ -530,10 +690,10 @@ def one_d_mass_dist(prior_Mbh, log_Mbh_min, log_Mbh_max,
         p = 0
         m_bh = 10**l_m_bh * Ms
         for j, a in enumerate(a_):
-            p_ = np.heaviside(mass_mass_matrix[j] - m_bh, 1) * likelihood(m_bh/mass_mass_matrix[i]) 
-            p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_Mbh(l_m_bh) * dMbh * prior_spin(a) * da_
+            p_ = np.heaviside(mass_mass_matrix[j] - m_bh, 1) * additional_likelihood(m_bh/mass_mass_matrix[i]) 
+            p += np.sum(np.sum(p_ * psd * dMs, axis=1) * ppsi * dpsi, axis=0) * prior_spin(a) * da_
     
-        p_bh[i] = p
+        p_bh[i] = p * prior_Mbh(l_m_bh)
 
     p_bh = p_bh/sum(p_bh * dMbh)
     
@@ -558,28 +718,41 @@ def monte_carlo_all(prior_Mbh, log_Mbh_min, log_Mbh_max,
                   
                   eta = 1,
                   
-                  likelihood=None):
+                  additional_likelihood=None):
     """
+    Runs a monte carlo simulation of length N_draw and returns the parameters of each of the successful TDEs. 
+
     Inputs: 
-        prior_Mbh = function which accepts the logarithm of the black hole mass and returns a prior. 
-        log_Mbh_min, log_Mbh_max = extent of black hole mass range to compute posterior over. 
-        prior_spin = function that accepts dimensionless spin and returns a prior. 
-        M_star_min, M_star_max = lower and upper bounds on stellar population. 
+        prior_Mbh -- function which accepts the logarithm of the black hole mass and returns a prior. 
+        log_Mbh_min, log_Mbh_max -- extent of black hole mass range to compute posterior over. Units = log_10 M_solar.
 
-        N_draw = number of Monte Carlo samples to perform. 
+        prior_spin -- function that accepts dimensionless spin and returns a prior.
+        If none, defaults to flat prior. 
 
-        prior_star, prior_psi = other possible priors, default to sensible ones if left blank. 
-        N_X (etc.) the number of grid spaces for variable X. 
+        max_mass_matrix -- the ooutput of get_hills_masses().
+        If None calculates this matrix in this code. 
 
-        eta = stellar parameter (see paper).  
+        N_draw -- the number of monte-carlo samples to perform. 
 
-        likelihood = a function that accepts M_bh/M_hills and returns a likelihood. Defaults to 1 if unspecified (as in paoer). 
-    
+        M_star_min, M_star_max -- lower and upper bounds on stellar population. Solar units expected. 
+
+        prior_star, prior_psi -- prior distribtuions of stellar properties and incoming inclinations. 
+        Defaults to the priors used in the paper if None. 
+        
+        N_X -- the number of grid spaces for variable X. 
+
+        eta -- stellar self gravity parameter (see paper).  
+        Defaults to 1. 
+
+        additional_likelihood -- a function that accepts M_bh/M_hills and returns a likelihood. 
+        Defaults to 1 if unspecified (as in paoer). See Appendix D of paper. 
+        Using additional likelihood will result in stronger spin constraints, but must be physically motivated.     
+
     Returns: 
-        a_samples, m_samples, mstar_samples, prior_samples = list of length N_draw of all the parameters from successful TDE samples. 
+        a_samples, m_samples, mstar_samples, psi_samples = list of length N_draw of all the parameters from successful TDE samples. 
 
     Notes:
-        Returned samples a_samples includes both prograde and retrograde spins.  
+        Returned a_samples includes both prograde and retrograde spins.  
 
     """
     if prior_spin is None:
@@ -643,8 +816,8 @@ def monte_carlo_all(prior_Mbh, log_Mbh_min, log_Mbh_max,
     psi_samples = np.full(N_draw, np.nan)
 
 
-    if likelihood is None:
-        likelihood = lambda x: np.ones_like(x)
+    if additional_likelihood is None:
+        additional_likelihood = lambda x: np.ones_like(x)
 
     print('Generating samples......')
     n=0
@@ -669,7 +842,7 @@ def monte_carlo_all(prior_Mbh, log_Mbh_min, log_Mbh_max,
 
         m_test = (m_bh * (MassRadiusRelation(m_star)/Rs)**-1.5 * (Ms/m_star)**-0.5 * eta**-0.5)
 
-        p_ = (max_mass_matrix[i, j] > m_test) *  likelihood(m_test/max_mass_matrix[i, j]) 
+        p_ = (max_mass_matrix[i, j] > m_test) *  additional_likelihood(m_test/max_mass_matrix[i, j]) 
 
         y = np.random.uniform(0, 1, 1)
 
@@ -690,7 +863,7 @@ def monte_carlo_all(prior_Mbh, log_Mbh_min, log_Mbh_max,
     return a_samples, m_samples, m_star_samples, psi_samples
 
 
-def one_d_observable_dist(observe_dist, observe_values,
+def observable_posterior(observe_dist, observe_values,
                   prior_Mbh, log_Mbh_min, log_Mbh_max,
                   prior_spin=None,
                   max_mass_matrix = None,
@@ -705,11 +878,49 @@ def one_d_observable_dist(observe_dist, observe_values,
                   N_spin = 300, 
                   N_psi = 200, 
                   
-                  eta = 1): 
+                  eta = 1,
+                  additional_likelihood=None):
+
+    """
+    Computes the posterior of a TDE observable O which depends only on black hole mass. 
+
+    Inputs: 
+        observe_dist -- a probability density function that takes in as input a value of the observable, 
+        and black hole mass, and returns a probability density. This is p(O|M) in the notation of the paper. 
+
+        observe_values -- a list of values at which to evaluate the posterior. 
     
-    p_tde, m_tde = one_d_mass_dist(max_mass_matrix=max_mass_matrix, prior_Mbh=prior_Mbh, prior_spin=prior_spin, prior_star=prior_star, prior_psi=prior_psi,
+        prior_Mbh -- function which accepts the logarithm of the black hole mass and returns a prior. 
+        log_Mbh_min, log_Mbh_max -- extent of black hole mass range to compute posterior over. Units = log_10 M_solar.
+
+        prior_spin -- function that accepts dimensionless spin and returns a prior.
+        If none, defaults to flat prior. 
+
+        max_mass_matrix -- the ooutput of get_hills_masses().
+        If None calculates this matrix in this code. 
+
+        M_star_min, M_star_max -- lower and upper bounds on stellar population. Solar units expected. 
+
+        prior_star, prior_psi -- prior distribtuions of stellar properties and incoming inclinations. 
+        Defaults to the priors used in the paper if None. 
+        
+        N_X -- the number of grid spaces for variable X. 
+
+        eta -- stellar self gravity parameter (see paper).  
+        Defaults to 1. 
+
+        additional_likelihood -- a function that accepts M_bh/M_hills and returns a likelihood. 
+        Defaults to 1 if unspecified (as in paoer). See Appendix D of paper. 
+        Using additional likelihood will result in stronger spin constraints, but must be physically motivated.     
+    
+    Returns: 
+        p_observe -- the values of the posterior for the observable O.
+
+    """
+    
+    p_tde, m_tde = mass_posterior(max_mass_matrix=max_mass_matrix, prior_Mbh=prior_Mbh, prior_spin=prior_spin, prior_star=prior_star, prior_psi=prior_psi,
                                    log_Mbh_min=log_Mbh_min, log_Mbh_max=log_Mbh_max, N_star=N_star, Mstar_min=Mstar_min, 
-                                   Mstar_max=Mstar_max, N_bh = N_bh, N_spin=N_spin, N_psi=N_psi, eta=eta)## Get 1D mass posterior
+                                   Mstar_max=Mstar_max, N_bh = N_bh, N_spin=N_spin, N_psi=N_psi, eta=eta, additional_likelihood=additional_likelihood)## Gets 1D mass posterior.
     
 
     dM = m_tde[1] - m_tde[0]
@@ -717,7 +928,7 @@ def one_d_observable_dist(observe_dist, observe_values,
     p_observe = np.zeros_like(observe_values)
 
     for k, o in enumerate(observe_values):
-        p_observe[k] = sum( observe_dist(o, np.array(m_tde)) * p_tde * dM )
+        p_observe[k] = sum( observe_dist(o, np.array(m_tde)) * p_tde * dM )## Integrates p(O|M) p(M) dM. 
     
     return p_observe
 
@@ -739,8 +950,48 @@ def monte_carlo_observable(observe_func,
                   Mstar_min=0.1, 
                   Mstar_max=1,
                   
-                  eta = 1):
+                  eta = 1,
+                  additional_likelihood=None):
+    """
+    Runs a monte carlo simulation of length N_draw and returns the parameters of each of the successful TDEs. 
+    Also computes a TDE observable for each TDE, which is assumed to depend only on black hole mass,  
+    and returns the monte-carlo distribution of the observable. 
+
+    Inputs: 
+        observe_func -- function which takes as input log_mbh and returns an observable. 
+
+        prior_Mbh -- function which accepts the logarithm of the black hole mass and returns a prior. 
+        log_Mbh_min, log_Mbh_max -- extent of black hole mass range to compute posterior over. Units = log_10 M_solar.
+
+        prior_spin -- function that accepts dimensionless spin and returns a prior.
+        If none, defaults to flat prior. 
+
+        max_mass_matrix -- the ooutput of get_hills_masses().
+        If None calculates this matrix in this code. 
+
+        N_draw -- the number of monte-carlo samples to perform. 
+
+        M_star_min, M_star_max -- lower and upper bounds on stellar population. Solar units expected. 
+
+        prior_star, prior_psi -- prior distribtuions of stellar properties and incoming inclinations. 
+        Defaults to the priors used in the paper if None. 
+        
+        N_X -- the number of grid spaces for variable X. 
+
+        eta -- stellar self gravity parameter (see paper).  
+        Defaults to 1. 
+
+        additional_likelihood -- a function that accepts M_bh/M_hills and returns a likelihood. 
+        Defaults to 1 if unspecified (as in paoer). See Appendix D of paper. 
+        Using additional likelihood will result in stronger spin constraints, but must be physically motivated.     
     
+    Returns: 
+        obs_samples, a_samples, m_samples, mstar_samples, psi_samples -- list of length N_draw of all the parameters from successful TDE samples. 
+
+    Notes:
+        Returned a_samples includes both prograde and retrograde spins.  
+
+    """    
     if prior_spin is None:
         prior_spin = lambda a: np.ones_like(a)## agnostic spin prior. 
     
@@ -822,7 +1073,8 @@ def monte_carlo_observable(observe_func,
         a_bh = a_[np.argmin(abs(PHI_A - x))]
         i = np.argmin(abs(a_ - a_bh))
 
-        p_ = max_mass_matrix[i, j] > (m_bh * (MassRadiusRelation(m_star)/Rs)**-1.5 * (Ms/m_star)**-0.5 * eta**-0.5)
+        m_test = (m_bh * (MassRadiusRelation(m_star)/Rs)**-1.5 * (Ms/m_star)**-0.5 * eta**-0.5)
+        p_ = (max_mass_matrix[i, j] > m_test) *  additional_likelihood(m_test/max_mass_matrix[i, j]) 
 
         if p_:
             m_samples[n] = l_m_bh 
