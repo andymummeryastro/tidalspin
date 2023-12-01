@@ -1,3 +1,17 @@
+"""
+A series of python functions for computing posterior distributions 
+of the black hole parameters involved in tidal disruption events.   
+
+Author: Andrew Mummery, Oxford University. 1st December 2023. 
+        andrew.mummery@physics.ox.ac.uk 
+
+Paper: The maximum mass of a black hole which can tidally disrupt a star: 
+       measuring black hole spins with tidal disruption events
+       Andrew Mummery. 
+       Published in MNRAS. 
+
+Please cite this work if you use these scripts. 
+"""
 import numpy as np 
 from numpy import cos, sin, pi, roots
 from astropy import constants 
