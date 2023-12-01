@@ -1059,6 +1059,9 @@ def monte_carlo_observable(observe_func,
     PHI_psis = np.cumsum(ppsi * dpsi)
     PHI_A = np.cumsum(prior_spin(a_)*da_)/np.sum(prior_spin(a_)*da_)
 
+    if additional_likelihood is None:
+        additional_likelihood = lambda x: np.ones_like(x)
+
 
     m_samples = np.full(N_draw, np.nan)
     a_samples = np.full(N_draw, np.nan)
